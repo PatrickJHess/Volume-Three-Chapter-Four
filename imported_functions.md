@@ -2,50 +2,71 @@
 
 ::::{dropdown} 🔍 View the helper functions of the Chapter
 
-:::{dropdown} Click to see `adjust_bond_pay_dates`
+:::{dropdown} Click to see `ns_spot_rates]`
 
 ```py
-def adjust_bond_pay_dates(dates,calendar='SIFMAUS'):
-  """
-  Adjusts bond payment dates to account for holidays and weekends.
-  dates can be a scalar, pandas series, or numpy array (datetime.date,timestamp, or datetime64)
-  """
+def ns_spot_rates(interim_estimates,mat_years):
 
-  import pandas as pd
-  import numpy as np
-  import pandas_market_calendars as mcal
-  from pandas.tseries.holiday import GoodFriday
+  # current values of estimates
+  b_0,b_1,b_2,tau=interim_estimates
 
-  # Ensure dates is a DatetimeIndex
-  if not pd.api.types.is_scalar(dates):
-      dates = pd.DatetimeIndex(pd.to_datetime(dates))
-  else:
-      dates = pd.DatetimeIndex(pd.to_datetime([dates]))
+  # t saves typing
+  t=mat_years
 
-  sifma = mcal.get_calendar(calendar)
-  sifma_holidays = sifma.holidays().holidays
-  good_fridays = GoodFriday.dates('2000-01-01', '2060-12-31')
+  # Avoid division by zero for t=0
+  t = np.where(t == 0, 1e-8, t)
+  # Nelson-Siegel model
+  spot_rates=b_0+b_1*(1-np.exp(-t/tau))/(t/tau)\
+  +b_2*((1-np.exp(-t/tau))/(t/tau)-np.exp(-t/tau))
 
-  # Convert to DatetimeIndex and use .union() (which automatically deduplicates and sorts)
-  sifma_idx = pd.DatetimeIndex(sifma_holidays)
-  gf_idx = pd.DatetimeIndex(good_fridays)
-  master_bond_holidays = sifma_idx.union(gf_idx)
-
-  # Create a CustomBusinessDay offset using the combined holidays
-  numpy_holidays = master_bond_holidays.values.astype('datetime64[D]')
-
-  # Use NumPy for lightning-fast, fully vectorized date math (No warnings!)
-  actual_payment_dates = np.busday_offset(
-      dates.values.astype('datetime64[D]'),
-      offsets=0,
-      roll='forward',
-      holidays=numpy_holidays
-  )
-
-  final_dates = pd.to_datetime(actual_payment_dates).date
-
-  return final_dates 
+  # pass these rates to the objective function for step one
+  return spot_rates,t
 ```
+:::
+
+
+:::{dropdown} Click to see `estimate_ns_parameters]`
+
+```py
+def estimate_ns_parameters(df_payoff_matrix,P_actual,mat_years,guesses):
+
+  # objective function is sum squared residuals (SSR)
+  def predict_prices(interim_estimates,df_payoff_matrix,P_actual,mat_years):
+
+    # for step one get rates
+    spot_rates,mat_years=ns_spot_rates(interim_estimates,mat_years)
+
+    # calculate zero prices
+    zero_prices=np.exp(-spot_rates*mat_years)
+
+    # calculate predicted prices (@ here is the same as np.matmul)
+    P_predicted=df_payoff_matrix@zero_prices
+
+    # step 2 calculate the distance with sum of squared residuals
+    ssr= np.sum((P_actual.values-P_predicted)**2)
+    return ssr
+
+  # use the scipy minimize function to estimate parameters
+
+  # Nelder-Mead doesn't take derivatives and tolerant of data
+  method='Nelder-Mead'
+
+  # minimize results
+  ns_results=minimize(fun=predict_prices,
+                  x0=guesses,
+                  args=(df_payoff_matrix,P_actual,mat_years),
+                  method=method)
+
+  # get estimated coefficients of Nelson-Siegel
+  b_0,b_1,b_2,tau=ns_results.x
+
+  # get status of minimization
+  completion_status=ns_results.message
+
+  display(f'Completion status: {completion_status}')
+  display(f'Long Rate (Beta Zero) {b_0:.4f}..Slope (Beta One) {b_1: .4f}...\
+  Shape (Beta Three) {b_2: .4f}...Scaling (Tau) {tau: .4f}')
+  return ns_results```
 :::
 
 :::{dropdown} Click to see `bond_pay_data`
