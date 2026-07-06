@@ -1,7 +1,7 @@
 version: 1
 project:
   title: >-
-    Nelson and Siegel Estimates of the Term Structure of Interest Rates
+    "📏📐〰️ Applying Level, Slope, and Shape to construct a continuous pricing model."
   abstract: |
     Estimating continuous spot and forward rates
   github: PatrickJHess/Volume-Three-Chapter-Four
@@ -30,13 +30,13 @@ project:
           file: Interacting With Jupyter Books.md
     - title: 'Chapter Four: Nelson and Siegel Estimates of the Term Structure of Interest Rates'
       children:
-        - title: Chapter Highlights
+        - title: ✨ Chapter Highlights
           file: Chapter_Four_Highlights.md
-        - title: Why the Nelson-Siegel Model
+        - title: ❓ Why the Nelson-Siegel Model
           file: Nelson_Siegel.md
-        - title: Estimating the Nelson-Siegel Model
+        - title: 🌊 Estimating the Nelson-Siegel Model
           file: notebooks/Nelson_and_Siegel_From_bond_prices
-        - title: Chapter Summary
+        - title: 📝 Chapter Summary
           file: Chapter_Summary.md
         - title: Imported Functions
           file: imported_functions.md

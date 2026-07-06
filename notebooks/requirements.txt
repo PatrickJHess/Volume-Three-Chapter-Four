@@ -9,3 +9,5 @@ ipynbname
 bs4
 pandas_market_calendars
 scipy
+pandas-datareader
+pandas<3.0
