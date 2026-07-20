@@ -5,22 +5,71 @@
 :::{dropdown} Click to see `ns_spot_rates]`
 
 ```py
-def ns_spot_rates(interim_estimates,mat_years):
+def ns_spot_rates(interim_estimates, mat_years, sofr_rate=None, fixed_tau=0.731):
+    """
+    Calculates spot rates using a fully vectorized Nelson-Siegel model.
+    Accepts either single parameter vectors or (N, columns) simulation matrices.
+    Dynamically accommodates tau if included in the estimates.
+    """
+    # 1. Ensure mat_years is a numpy array and handle division-by-zero
+    t = np.array(mat_years, dtype=float)
+    t = np.where(t == 0, 1e-8, t)
+    
+    if isinstance(interim_estimates, pd.DataFrame):
+        interim_estimates = interim_estimates.to_numpy()
+        
+    # 2. Check if we are passing a 2D matrix of simulations
+    is_matrix = isinstance(interim_estimates, np.ndarray) and interim_estimates.ndim == 2
+    
+    if sofr_rate is not None:  # Restricted model
+        if is_matrix:
+            # Base restricted params: b0, b2 (2 columns)
+            b_0 = interim_estimates[:, 0][:, np.newaxis]
+            b_2 = interim_estimates[:, 1][:, np.newaxis]
+            
+            # If 3 columns, the 3rd is tau
+            if interim_estimates.shape[1] == 3:
+                tau = interim_estimates[:, 2][:, np.newaxis]
+            else:
+                tau = fixed_tau 
+        else:
+            # Fallback for 1D array
+            b_0, b_2 = interim_estimates[0], interim_estimates[1]
+            tau = interim_estimates[2] if len(interim_estimates) == 3 else fixed_tau
 
-  # current values of estimates
-  b_0,b_1,b_2,tau=interim_estimates
+        # Vectorized math
+        spot_rates = (
+            b_0
+            + (sofr_rate - b_0) * (1 - np.exp(-t/tau)) / (t/tau)
+            + b_2 * ((1 - np.exp(-t/tau)) / (t/tau) - np.exp(-t/tau))
+        )
+        
+    else:  # Unrestricted model
+        if is_matrix:
+            # Base unrestricted params: b0, b1, b2 (3 columns)
+            b_0 = interim_estimates[:, 0][:, np.newaxis]
+            b_1 = interim_estimates[:, 1][:, np.newaxis]
+            b_2 = interim_estimates[:, 2][:, np.newaxis]
+            
+            # If 4 columns, the 4th is tau (Index 3)
+            if interim_estimates.shape[1] == 4:
+                tau = interim_estimates[:, 3][:, np.newaxis]
+            else:
+                tau = fixed_tau            
+        else:
+            # Fallback for 1D array
+            b_0, b_1, b_2 = interim_estimates[0], interim_estimates[1], interim_estimates[2]
+            tau = interim_estimates[3] if len(interim_estimates) == 4 else fixed_tau
 
-  # t saves typing
-  t=mat_years
+        # Vectorized math
+        spot_rates = (
+            b_0
+            + b_1 * (1 - np.exp(-t/tau)) / (t/tau)
+            + b_2 * ((1 - np.exp(-t/tau)) / (t/tau) - np.exp(-t/tau))
+        )
 
-  # Avoid division by zero for t=0
-  t = np.where(t == 0, 1e-8, t)
-  # Nelson-Siegel model
-  spot_rates=b_0+b_1*(1-np.exp(-t/tau))/(t/tau)\
-  +b_2*((1-np.exp(-t/tau))/(t/tau)-np.exp(-t/tau))
+    return spot_rates, t
 
-  # pass these rates to the objective function for step one
-  return spot_rates,t
 ```
 :::
 
@@ -28,13 +77,35 @@ def ns_spot_rates(interim_estimates,mat_years):
 :::{dropdown} Click to see `estimate_ns_parameters]`
 
 ```py
-def estimate_ns_parameters(df_payoff_matrix,P_actual,mat_years,guesses):
+def estimate_ns_parameters(df_payoff_matrix,P_actual,mat_years,guesses,sofr_rate=None):
+  """
+    Estimates Nelson-Siegel parameters by minimizing the Sum of Squared Residuals (SSR) 
+    between actual bond prices and model-predicted bond prices.
 
+    Args:
+        df_payoff_matrix (pd.DataFrame or np.ndarray): Matrix of bond cash flows 
+            where rows are bonds and columns represent time periods.
+        P_actual (pd.Series or np.ndarray): Observed market prices of the bonds.
+        mat_years (array-like): Time to maturity for each cash flow period, in years.
+        guesses (list or array-like): Initial guesses for the optimization solver.
+            Must have length 3 if sofr_rate is provided, or length 4 if None.
+        sofr_rate (float, optional): A proxy short-term rate used to restrict the 
+            short end of the curve. Defaults to None.
+
+    Returns:
+        scipy.optimize.OptimizeResult: The optimization result object containing 
+            the estimated parameters (in the `.x` attribute), success status, 
+            and minimum SSR achieved.
+
+    Raises:
+        ValueError: If the length of the `guesses` array does not match the 
+            requirements of the chosen model type (restricted vs. unrestricted).
+  """
   # objective function is sum squared residuals (SSR)
   def predict_prices(interim_estimates,df_payoff_matrix,P_actual,mat_years):
 
     # for step one get rates
-    spot_rates,mat_years=ns_spot_rates(interim_estimates,mat_years)
+    spot_rates,mat_years=ns_spot_rates(interim_estimates,mat_years,sofr_rate=sofr_rate)
 
     # calculate zero prices
     zero_prices=np.exp(-spot_rates*mat_years)
@@ -48,6 +119,13 @@ def estimate_ns_parameters(df_payoff_matrix,P_actual,mat_years,guesses):
 
   # use the scipy minimize function to estimate parameters
 
+# Validate guess lengths based on model type
+    if sofr_rate is not None and len(guesses) != 3:
+        raise ValueError(f"Restricted model (SOFR={sofr_rate}) requires exactly 3 guesses. You provided {len(guesses)}.")
+    
+    if sofr_rate is None and len(guesses) != 4:
+        raise ValueError(f"Unrestricted model requires exactly 4 guesses. You provided {len(guesses)}.")
+
   # Nelder-Mead doesn't take derivatives and tolerant of data
   method='Nelder-Mead'
 
@@ -58,15 +136,24 @@ def estimate_ns_parameters(df_payoff_matrix,P_actual,mat_years,guesses):
                   method=method)
 
   # get estimated coefficients of Nelson-Siegel
-  b_0,b_1,b_2,tau=ns_results.x
+
 
   # get status of minimization
   completion_status=ns_results.message
 
-  display(f'Completion status: {completion_status}')
-  display(f'Long Rate (Beta Zero) {b_0:.4f}..Slope (Beta One) {b_1: .4f}...\
-  Shape (Beta Three) {b_2: .4f}...Scaling (Tau) {tau: .4f}')
-  return ns_results```
+  if sofr_rate is not None:
+    b_0,b_2,tau=ns_results.x
+    display(f'Completion status: {completion_status}')
+    display(f'Long Rate (Beta Zero) {b_0:.4f}..Slope (sofr_rate -Beta Zero) {sofr_rate-b_0: .4f}...\
+    Shape (Beta Two) {b_2: .4f}...Scaling (Tau) {tau: .4f}') 
+
+  else:
+    b_0,b_1,b_2,tau=ns_results.x
+    display(f'Completion status: {completion_status}')
+    display(f'Long Rate (Beta Zero) {b_0:.4f}..Slope (Beta One) {b_1: .4f}...\
+    Shape (Beta Two) {b_2: .4f}...Scaling (Tau) {tau: .4f}') 
+  return ns_results
+
 :::
 
 :::{dropdown} Click to see `bond_pay_data`
@@ -89,30 +176,34 @@ def bond_pay_data(maturity, coupon, settlement=None, freq=2):
         ValueError: If inputs are not logically valid (e.g., negative coupon,
                     maturity before settlement).
     '''
-    from datetime import datetime, date
-    from dateutil.relativedelta import relativedelta
-    import pandas as pd
-    import numpy as np
-    from IPython.display import display, Markdown as md
+
 
     # Validate the data - maturity, coupon, settlement, freq
-    def validate_date(datetime_object):
-        # check for datetime or date
-        if not isinstance(datetime_object, (datetime, date)):
-            raise TypeError("Input must be a datetime or date object.")
-        # convert datetime to date
-        if isinstance(datetime_object, datetime):
-            datetime_object = datetime_object.date()
-        return datetime_object
+    def make_date(date_value):
+      # datetime64 are conerted
+      if not isinstance(date_value,(datetime,date)):
+        try:
+          date_value=pd.Timestamp(date_value).date()
+        except Exception as e: # Catch anything else unexpected
+          print(f"wrong type for settlement or maturity {e}")
+  
+        date_value=pd.Timestamp(settlement).date()
+      # convert timestamps and datetimes to date
+      else:
+        try:
+          date_value=date_value.date()
+        except:
+          pass
+      return date_value
 
     # maturity
-    maturity = validate_date(maturity)
+    maturity = make_date(maturity)
 
     # settlement
     if settlement is None:
         settlement = date.today()
     else:
-        settlement = validate_date(settlement)
+        settlement = make_date(settlement)
 
     # coupon
     try:
@@ -134,14 +225,14 @@ def bond_pay_data(maturity, coupon, settlement=None, freq=2):
     if coupon == 0:
         # Adjust maturity for non-settlement day and return date and face value
         adjust_maturity = adjust_bond_pay_dates(maturity)
-        return np.array([adjust_maturity['Settlement'].dt.date]), np.array([100.0])
+        return np.array(adjust_maturity), np.array([100.0])
 
     # get scheduled payment dates from helper function scheduled_pay_dates
     scheduled_dates = scheduled_pay_dates(maturity, settlement, freq)
 
     # Pandas DataFrame Settlement desired column
-    both_dates = adjust_bond_pay_dates(scheduled_dates)
-    pay_dates=np.array(both_dates['Settlement'].dt.date)
+    pay_dates = adjust_bond_pay_dates(scheduled_dates)
+
     # calculate payments
     # coupon divided by freq at each date
     pay = np.full(len(pay_dates), coupon / freq)
@@ -150,6 +241,7 @@ def bond_pay_data(maturity, coupon, settlement=None, freq=2):
     pay[-1] += 100
 
     return pay_dates,pay
+
 ```
 :::
 
@@ -193,10 +285,10 @@ def create_payoff_df(df, settlement,OLS=False):
           if OLS:
             df_clean = df_payoff.loc[(df_payoff != 0).any(axis=1),
                                          (df_payoff != 0).any(axis=0)]
-            print("✅ DataFrame Complete (Exited Early)!")
+            print("\u2705 DataFrame Complete (Exited Early)!")
             return df_clean
           else:
-            # ✅ FIX: Add new dates to our master set and reindex
+            # "\u2705 FIX: Add new dates to our master set and reindex
             all_maturities.update(new_dates)
             df_payoff = df_payoff.reindex(columns=sorted(all_maturities), fill_value=0.0)
  
@@ -209,7 +301,7 @@ def create_payoff_df(df, settlement,OLS=False):
     progress_ui.update(HTML("""
         <div style="font-family: Arial, sans-serif; padding: 10px 15px; background-color: #e6f4ea; 
                     border-left: 4px solid #34a853; border-radius: 4px; width: fit-content; color: #137333;">
-            <b>✅ DataFrame Complete!</b> All bonds added successfully.
+            <b>"\u2705 DataFrame Complete!</b> All bonds added successfully.
             </div>
             """))
     return df_payoff
@@ -224,9 +316,12 @@ def FEDInvest(price_date):
   """
     Fetches historical security prices from the FedInvest portal.
 
+
     Args:
         price_date (datetime.date): The date for which to retrieve prices.
             Note: Current day is typically available after 1:00 PM ET on business days.
+
+
 
 
     Returns:
@@ -236,29 +331,46 @@ def FEDInvest(price_date):
         tuple: (str, None) if the request fails or no data is found for the date
                 (attempt to fetch current day before 1:00 PM ET).
 
+
     Example:
         >>> from datetime import date
         >>> df, stamp = FEDInvest(date(2025, 3, 17))
   """
-  import requests
-  from io import StringIO
-  import pandas as pd
-  from datetime import datetime, date
-  from dateutil.relativedelta import relativedelta
 
-  # check for date or datetime
-  validate_date(price_date)
 
+  def make_date(date_value):
+    # datetime64 are conerted
+    if not isinstance(date_value,(datetime,date)):
+      try:
+        date_value=pd.Timestamp(date_value).date()
+      except Exception as e: # Catch anything else unexpected
+        print(f"wrong type for settlement or maturity {e}")
+
+
+      date_value=pd.Timestamp(settlement).date()
+    # convert timestamps and datetimes to date
+    else:
+      try:
+        date_value=date_value.date()
+      except:
+        pass
+    return date_value
+
+
+  price_date=make_date(price_date)
   # make share date of prices and settlement date are settlement dates
-  price_date=adjust_bond_pay_dates(price_date)
+  price_date=adjust_bond_pay_dates(price_date)[0]
   if price_date > date.today():
     return "price_date is in the future", None, None
-  
+
+
   settlement_date=price_date+relativedelta(days=1)
   settlement_date=adjust_bond_pay_dates(settlement_date)
 
+
   # URL address of Treasury Direct Select A Date
   url = "https://treasurydirect.gov/GA-FI/FedInvest/selectSecurityPriceDate"
+
 
   # Standard headers to look like a real browser
   headers = {
@@ -266,17 +378,18 @@ def FEDInvest(price_date):
      (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
     "Content-Type": "application/x-www-form-urlencoded"
   }
-
   #  variable names and type identified from inspecting url
   month=str(price_date.month)
   day=str(price_date.day)
   year=str(price_date.year)
+
 
   # payload passed in request post
   payload={'priceDate.month':month,
            'priceDate.day':day,
            'priceDate.year':year,
            "submit": "Show Prices"}
+
 
   # fires off form and returns prices for date
   try:
@@ -285,12 +398,25 @@ def FEDInvest(price_date):
   except requests.exceptions.RequestException as e:
         return f"Connection Error: {e}", None
 
+
   # reads the html
   # Pandas recommends to wrap the response in StingIO to make file like
   tables=pd.read_html(StringIO(response.text),match='CUSIP')
 
+
   # from inspection there is a single table
-  return tables[0], price_date,settlement_date
+  df=tables[0]
+
+
+  df['MATURITY DATE']=pd.to_datetime(df['MATURITY DATE'])
+
+
+  # drop rows equal to or less than settlement date
+  df_filtered=df[df['MATURITY DATE']>pd.to_datetime(settlement_date[0])]
+
+
+  return df_filtered, price_date,settlement_date[0]
+
 ```
 :::
 
@@ -298,6 +424,7 @@ def FEDInvest(price_date):
 
 ```py
 def clean_FEDInvest(df):
+
 
     import pandas as pd
     # Filters for Standard Securities
@@ -308,10 +435,12 @@ def clean_FEDInvest(df):
     drop_columns=['CUSIP','CALL DATE']
     security_df.drop(columns=drop_columns,inplace=True)
 
+
     # Creates a Time-Series Index
     security_df.set_index('MATURITY DATE',inplace=True)
     security_df.index=pd.to_datetime(security_df.index)
     security_df.sort_index(inplace=True)
+
 
     # Standardizes Financial Terms
     change_column_names={'RATE':'Coupon',
@@ -319,13 +448,16 @@ def clean_FEDInvest(df):
                          'SELL':'Price Bid'}
     security_df.rename(columns=change_column_names,inplace=True)
 
+
     # Formats Numeric Data
     numeric_cols = ['Coupon', 'Price Ask', 'Price Bid', 'YIELD']
     for col in numeric_cols:
         if col in security_df.columns:
             security_df[col] = security_df[col].astype(str).str.replace('%', '', regex=False).astype(float)
 
+
     return security_df
+
 ```
 :::
 

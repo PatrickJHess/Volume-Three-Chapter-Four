@@ -14,7 +14,7 @@
   * **SciPy**: Using the optimize module to estimate the Nelson-Siegel model ⚙️  
   * **NumPy arrays & Pandas DataFrames 🐼**  
   * **Web Scraping**: Accessing live bond price data via POST requests 🌐    
-  * **Custom module**: Utilizing accrued_interest, create_payoff_matrix, one_y_axis, FEDInvest, and clean_FEDInvest 📦
+  * **🧩 financial_quant package** 📦
 
 ### 📚 Background & Prerequisites
 This chapter's examples and discussions rely heavily on the Pandas, NumPy, and datetime libraries. The following introductory materials are recommended for context:
@@ -36,4 +36,4 @@ This chapter is divided into the following five distinct sections:
 
 * **📝 Chapter Summary**: A concise recap of the primary financial takeaways and computational results.
 
-* **📦 Imported Functions**: Details the specific custom functions imported for the chapter.
+* **📦 Imported Functions**: describes the functions imported from financial_quant package.
