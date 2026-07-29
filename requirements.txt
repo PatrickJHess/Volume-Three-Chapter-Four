@@ -6,6 +6,7 @@ matplotlib
 python-dateutil
 holidays
 ipynbname
+html5lib
 bs4
 pandas_market_calendars
 scipy
