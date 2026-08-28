@@ -12,8 +12,7 @@
 ## 🐍 Python Concepts 
     
   * **SciPy**: Using the optimize module to estimate the Nelson-Siegel model ⚙️  
-  * **NumPy arrays & Pandas DataFrames 🐼**  
-  * **Web Scraping**: Accessing live bond price data via POST requests 🌐    
+  * **NumPy arrays & Pandas DataFrames 🐼**    
   * **🧩 financial_quant package** 📦
 
 ### 📚 Background & Prerequisites
@@ -26,11 +25,9 @@ This chapter's examples and discussions rely heavily on the Pandas, NumPy, and d
 * [**SCiPy Optimize Modules**: Tutorial](https://docs.scipy.org/doc/scipy/tutorial/optimize.htmll) 
 
 ## 🗺️ Chapter Outline
-This chapter is divided into the following five distinct sections:
+This chapter is divided into the following distinct sections:
 
 * **❓ Why Nelson and Siegel**: Develops the model framework, describes the core parameters, and explains their relationship to spot rates of interest.
-
-* **🌐 Accessing Treasury Bill Prices From Treasury Direct Website (Jupyter Notebook)**: Develops the FEDInvest function that sends a POST request to the FEDInvest page to return data for a specified date, and cleans the resulting dataset.
 
 * **💻 Estimating The Nelson and Siegel Model (Jupyter Notebook)**: Estimates the Nelson-Siegel model using the data from TreasuryDirect. It then uses these estimates to calculate forward rates and par yields for arbitrary future dates.
 
